@@ -1,0 +1,36 @@
+---
+- hosts: "{{ target_group | default('dev_servers') }}"
+  become: yes
+  vars:
+    env_prefix: "{{ env_prefix | default('dev') }}"
+    war_file: "{{ war_file | default('supermarket.war') }}"
+  tasks:
+    - name: Stop Tomcat
+      service:
+        name: tomcat
+        state: stopped
+        
+    - name: Backup existing WAR
+      copy:
+        src: "/root/multi-env-pipeline/wars/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}.war"
+        dest: "/opt/tomcat9/webapps/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}.war.backup"
+        remote_src: yes
+      ignore_errors: yes
+      
+    - name: Deploy WAR with ENV prefix
+      copy:
+        src: "{{ playbook_dir }}/wars/{{ war_file }}"
+        dest: "/opt/tomcat9/webapps/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}.war"
+        owner: tomcat
+        group: tomcat
+        mode: '0644'
+        
+    - name: Start Tomcat
+      service:
+        name: tomcat
+        state: started
+        enabled: yes
+        
+    - name: Wait for deployment
+      pause:
+        minutes: 1
