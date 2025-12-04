@@ -9,28 +9,63 @@
       service:
         name: tomcat
         state: stopped
-        
-    - name: Backup existing WAR
-      copy:
-        src: "/root/multi-env-pipeline/wars/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}.war"
-        dest: "/opt/tomcat9/webapps/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}.war.backup"
-        remote_src: yes
-      ignore_errors: yes
-      
-    - name: Deploy WAR with ENV prefix
+
+    - name: Cleanup old deployment (WAR + exploded folder)
+      file:
+        path: "/opt/tomcat9/webapps/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}"
+        state: absent
+
+    - name: Cleanup old WAR
+      file:
+        path: "/opt/tomcat9/webapps/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}.war"
+        state: absent
+
+    - name: Copy WAR with ENV prefix
       copy:
         src: "{{ playbook_dir }}/wars/{{ war_file }}"
         dest: "/opt/tomcat9/webapps/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}.war"
         owner: tomcat
         group: tomcat
         mode: '0644'
-        
+      register: war_copy
+
+    - name: Verify WAR deployed
+      stat:
+        path: "/opt/tomcat9/webapps/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}.war"
+      register: war_stat
+
+    - name: Show deployment status
+      debug:
+        msg: |
+          WAR Status:
+          - Copied: {{ war_copy.changed }}
+          - Exists: {{ war_stat.stat.exists }}
+          - Size: {{ war_stat.stat.size | default('N/A') }} bytes
+          - Path: /opt/tomcat9/webapps/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}.war
+
     - name: Start Tomcat
       service:
         name: tomcat
         state: started
         enabled: yes
-        
-    - name: Wait for deployment
+
+    - name: Wait for Tomcat + WAR explosion
       pause:
-        minutes: 1
+        seconds: 30
+
+    - name: Health check app
+      uri:
+        url: "http://192.168.154.131:8080/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}"
+        status: 200
+      register: health_check
+      failed_when: false
+      retries: 3
+      delay: 10
+
+    - name: Final deployment report
+      debug:
+        msg: |
+          DEPLOYMENT COMPLETE:
+          URL: http://192.168.154.131:8080/{{ env_prefix }}-{{ war_file | regex_replace('.war$', '') }}
+          HTTP Status: {{ health_check.status | default('unknown') }}
+          {{ '✅ LIVE!' if health_check.status == 200 else '⚠️ CHECK LOGS: tail -f /opt/tomcat9/logs/catalina.out' }}
