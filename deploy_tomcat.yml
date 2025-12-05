@@ -1,96 +1,64 @@
 ---
-- name: Deploy WAR to Tomcat9 (Multi-Environment)
-  hosts: "{{ target_group | default('tomcat_servers') }}"
+- name: Deploy Multiple WARs to {{ env_prefix | upper() }} Environment
+  hosts: all
   become: yes
   gather_facts: yes
-  
+
   vars:
     tomcat_service: tomcat
     tomcat_home: /opt/tomcat9
     webapps_dir: "{{ tomcat_home }}/webapps"
-    war_dest_name: "{{ env_prefix }}-{{ war_file | basename | regex_replace('.war$', '') }}"
+    env_prefix: "{{ env_prefix | default('test') }}"
 
   tasks:
-    - name: Validate required variables
-      assert:
-        that:
-          - war_file is defined
-          - env_prefix is defined
-        fail_msg: "Missing vars: war_file={{ war_file }}, env_prefix={{ env_prefix }}"
+    - name: Find WAR files on Jenkins controller
+      find:
+        paths: /root/multi-env-pipeline
+        patterns: "*.war"
+        recurse: yes
+        file_type: file
+      delegate_to: localhost
+      run_once: true
+      register: controller_war_files
 
-    - name: Stop Tomcat
+    - name: Debug - WARs found on controller
+      debug:
+        msg: "Found {{ controller_war_files.files | length }} WARs: {{ controller_war_files.files | map(attribute='path') | list }}"
+
+    - name: Fail if no WARs
+      fail:
+        msg: "No WARs found in /root/multi-env-pipeline"
+      when: controller_war_files.files | length == 0
+
+    - name: Stop Tomcat before deployment
       systemd:
         name: "{{ tomcat_service }}"
         state: stopped
-      register: tomcat_stopped
 
-    - name: Cleanup old deployment (WAR + exploded folder)
+    - name: Cleanup old WARs
       file:
-        path: "{{ webapps_dir }}/{{ war_dest_name }}"
+        path: "{{ webapps_dir }}/{{ env_prefix }}-*.war"
         state: absent
 
-    - name: Cleanup old WAR
+    - name: Cleanup exploded directories
       file:
-        path: "{{ webapps_dir }}/{{ war_dest_name }}.war"
+        path: "{{ webapps_dir }}/{{ env_prefix }}-*/"
         state: absent
 
-    - name: Copy WAR with ENV prefix
+    - name: Deploy ALL WARs from controller
       copy:
-        src: "{{ war_file }}"
-        dest: "{{ webapps_dir }}/{{ war_dest_name }}.war"
+        src: "{{ item.path }}"
+        dest: "{{ webapps_dir }}/{{ env_prefix }}-{{ item.path | basename | regex_replace('.war$', '') }}.war"
         owner: tomcat
         group: tomcat
         mode: '0644'
-      register: war_deployed
+        backup: yes
+      loop: "{{ controller_war_files.files }}"
+      notify: restart tomcat
 
-    - name: Verify WAR deployed
-      stat:
-        path: "{{ webapps_dir }}/{{ war_dest_name }}.war"
-      register: war_check
-
-    - name: Show deployment status
-      debug:
-        msg: |
-          WAR Status:
-          - Copied: {{ war_deployed.changed }}
-          - Exists: {{ war_check.stat.exists }}
-          - Size: {{ war_check.stat.size | default('N/A') }} bytes
-          - Path: {{ webapps_dir }}/{{ war_dest_name }}.war
-
-    - name: Wait 30s for WAR explosion
-      pause:
-        minutes: 0.5
-      when: war_check.stat.exists | bool
-
-    - name: Health check (optional - ignore failures)
-      uri:
-        url: "http://{{ ansible_host }}:8080/{{ war_dest_name }}"
-        status_code: [200, 302, 404]  # ✅ FIXED: status_code not status
-        return_content: yes
-        timeout: 30
-      register: health_check
-      ignore_errors: yes  # ✅ Continue even if app not ready
-
-    - name: Start Tomcat
+  handlers:
+    - name: restart tomcat
       systemd:
         name: "{{ tomcat_service }}"
         state: started
-        enabled: yes
-      register: tomcat_started
-
-    - name: Wait for Tomcat startup
-      wait_for:
-        host: "{{ ansible_host }}"
-        port: 8080
-        delay: 10
-        timeout: 60
-
-    - name: Final deployment report
-      debug:
-        msg: |
-          🎉 DEPLOYMENT COMPLETE!
-          WAR: {{ war_dest_name }}.war ({{ war_check.stat.size | default('unknown') }} bytes)
-          URL: http://{{ ansible_host }}:8080/{{ war_dest_name }}
-          Tomcat: {{ tomcat_started.state | default('running') }}
-          Health: {{ health_check.status | default('unchecked') }} ({{ health_check.msg | default('OK') }})
 
