@@ -9,26 +9,15 @@
     tomcat_home: /opt/tomcat9
     webapps_dir: "{{ tomcat_home }}/webapps"
     env_prefix: "{{ env_prefix | default('test') }}"
+    war_files:
+      - path: "/var/lib/jenkins/jobs/multi-env-pipeline/workspace/wars/supermarket.war"
+      - path: "/var/lib/jenkins/jobs/multi-env-pipeline/workspace/wars/sample.war"
+      - path: "/var/lib/jenkins/jobs/multi-env-pipeline/workspace/wars/TestServerKrishna.war"
 
   tasks:
-    - name: Find WAR files in workspace
-      find:
-        paths: .
-        patterns: "wars/*.war"
-        recurse: yes
-        file_type: file
-      delegate_to: localhost
-      run_once: true
-      register: controller_war_files
-
-    - name: Debug - WARs found on controller
+    - name: Debug - WARs ready for deployment
       debug:
-        msg: "Found {{ controller_war_files.files | length }} WARs: {{ controller_war_files.files | map(attribute='path') | list }}"
-
-    - name: Fail if no WARs
-      fail:
-        msg: "No WARs found in workspace/wars/"
-      when: controller_war_files.files | length == 0
+        msg: "Deploying {{ war_files | length }} WARs to {{ env_prefix }} environment"
 
     - name: Stop Tomcat before deployment
       systemd:
@@ -45,7 +34,7 @@
         path: "{{ webapps_dir }}/{{ env_prefix }}-*/"
         state: absent
 
-    - name: Deploy ALL WARs from controller
+    - name: Deploy ALL WARs from Jenkins workspace
       copy:
         src: "{{ item.path }}"
         dest: "{{ webapps_dir }}/{{ env_prefix }}-{{ item.path | basename | regex_replace('.war$', '') }}.war"
@@ -53,7 +42,7 @@
         group: tomcat
         mode: '0644'
         backup: yes
-      loop: "{{ controller_war_files.files }}"
+      loop: "{{ war_files }}"
       notify: restart tomcat
 
   handlers:
@@ -61,5 +50,3 @@
       systemd:
         name: "{{ tomcat_service }}"
         state: started
-
-      
