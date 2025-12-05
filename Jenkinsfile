@@ -25,7 +25,7 @@ pipeline {
                 sh '''
                     echo "✅ Checking multi-WAR deployment files..."
                     ls -la inventory-${ENVIRONMENT}.ini || (echo "❌ inventory-${ENVIRONMENT}.ini missing" && exit 1)
-                    ls -la /root/multi-env-pipeline/wars/*.war || (echo "❌ WARs missing in /root/multi-env-pipeline/wars/" && exit 1)
+                    ls -la wars/*.war || (echo "❌ WARs missing in workspace/wars/" && exit 1)
                     ls -la deploy_tomcat.yml || (echo "❌ deploy_tomcat.yml missing" && exit 1)
                     echo "✅ All 3 WARs ready for deployment!"
                 '''
