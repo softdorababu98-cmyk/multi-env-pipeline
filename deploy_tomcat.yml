@@ -11,15 +11,15 @@
     env_prefix: "{{ env_prefix | default('test') }}"
 
   tasks:
-   - name: Find WAR files in workspace
-  find:
-    paths: .
-    patterns: "wars/*.war"
-    recurse: yes
-    file_type: file
-  delegate_to: localhost
-  run_once: true
-  register: controller_war_files
+    - name: Find WAR files in workspace
+      find:
+        paths: .
+        patterns: "wars/*.war"
+        recurse: yes
+        file_type: file
+      delegate_to: localhost
+      run_once: true
+      register: controller_war_files
 
     - name: Debug - WARs found on controller
       debug:
@@ -27,7 +27,7 @@
 
     - name: Fail if no WARs
       fail:
-        msg: "No WARs found in /root/multi-env-pipeline"
+        msg: "No WARs found in workspace/wars/"
       when: controller_war_files.files | length == 0
 
     - name: Stop Tomcat before deployment
@@ -62,3 +62,4 @@
         name: "{{ tomcat_service }}"
         state: started
 
+      
